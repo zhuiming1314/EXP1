@@ -1,5 +1,5 @@
 import torch
-from model import LapNet
+from model import LapNet, LapAdaINModel1
 from options import TrainOptions
 from dataset import Dataset
 from saver import Saver
@@ -14,7 +14,8 @@ def main():
                         batch_size=args.batch_size, shuffle=True, num_workers=args.n_threads)
 
     print("----------load model---------")
-    model = LapNet(args)
+    #model = LapNet(args)     #first
+    model = LapAdaINModel1(args)
     model.set_gpu(args.gpu)
     if args.resume is None:
         model.initialize()
@@ -42,7 +43,10 @@ def main():
             input_b = input_b.cuda(args.gpu).detach()
 
             # update model
-            model.update_dec(input_a, input_b)
+            #model.update_dec(input_a, input_b)   #first update
+            model.setup_input(input_a, input_b)
+            model.update_dis()
+            model.update_gen()
 
             #save to display file
             saver.write_display(total_iter, model)

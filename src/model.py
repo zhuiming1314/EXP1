@@ -72,7 +72,8 @@ class LapNet(nn.Module):
         self.loss_content_relt = self.calc_content_relt_loss(self.a2b_f["r31"], self.a_f["r31"])\
                                 + self.calc_content_relt_loss(self.a2b_f["r41"], self.a_f["r41"])
 
-        
+        self.loss_style_remd *= 10
+        self.loss_content_relt *= 16
         self.loss = self.loss_c * self.content_weight + self.loss_s * self.style_weight + \
                         self.loss_style_remd + self.loss_content_relt
         print("loss_c:{}    loss_s:{}".format(self.loss_c, self.loss_s))
@@ -81,9 +82,10 @@ class LapNet(nn.Module):
         return self.loss
 
     def update_dec(self, input_a, input_b):
+        self.input_a = input_a
+        self.input_b = input_b
         self.forward(input_a, input_b)
-        print("self.a2b.size=", self.a2b.size())
-        
+
         self.dec_opt.zero_grad()
 
         self.backward_dec()
@@ -119,6 +121,14 @@ class LapNet(nn.Module):
         self.enc.cuda(self.gpu)
         self.dec.cuda(self.gpu)
 
+    def assemble_outputs(self):
+        img_a = self.input_a.detach()
+        img_b = self.input_b.detach()
+        img_a2b = self.a2b.detach()
+        row1 = torch.cat((img_a[0:1, ::], img_b[0:1, ::], img_a2b[0:1, ::]), 3)
+        row2 = torch.cat((img_a[1:2, ::], img_b[1:2, ::], img_a2b[1:2, ::]), 3)
+        return torch.cat((row1, row2), 2)
+
 class LapAdaINModel1(nn.Module):
     def __init__(self, args):
         super(LapAdaINModel1, self).__init__()
@@ -131,7 +141,7 @@ class LapAdaINModel1(nn.Module):
         self.set_requires_grad([self.dec], False)
 
         # define revise module
-        self.rev = network.ReviseNet(3)
+        self.rev = network.ReviseNet(6)
         self.dis = network.Discirminator()
 
         # define loss functions
@@ -151,14 +161,22 @@ class LapAdaINModel1(nn.Module):
         self.dis_opt = torch.optim.Adam(self.dis.parameters(), lr=1e-4, betas=(0.9, 0.999))
 
     def setup_input(self, a, b):
-        self.pyr_a = network.make_laplace_pyramid(self.a, 1)
-        self.pyr_b = network.make_laplace_pyramid(self.b, 1)
+        self.input_a = a
+        self.input_b = b
+        self.pyr_a = network.make_laplace_pyramid(self.input_a, 1)
+        self.pyr_b = network.make_laplace_pyramid(self.input_b, 1)
         self.pyr_a.append(a)
-        self.pry_b.append(b)
+        self.pyr_b.append(b)
 
     def initialize(self):
         self.rev.apply(network.gaussian_weights_init)
         self.dis.apply(network.gaussian_weights_init)
+
+    def set_gpu(self, gpu):
+        self.enc.cuda(gpu)
+        self.dec.cuda(gpu)
+        self.rev.cuda(gpu)
+        self.dis.cuda(gpu)
 
     def set_requires_grad(self, nets, requires_grad=False):
         if not isinstance(nets, list):
@@ -168,16 +186,20 @@ class LapAdaINModel1(nn.Module):
                 for param in net.parameters():
                     param.trainable = requires_grad
 
+    def load_model(self, path):
+        checkpoint = torch.load(path)
+        self.dec.load_state_dict(checkpoint["dec"])
+
     def forward(self):
         a_f = self.enc(self.pyr_a[1])
         b_f = self.enc(self.pyr_b[1])
 
-        a2b = self.dec(a_f, b_f)
-        a2b_up = F.interpolate(a2b, scale_factor=2)
+        self.a2b = self.dec(a_f, b_f)
+        a2b_up = F.interpolate(self.a2b, scale_factor=2)
 
         rev_input = torch.cat((self.pyr_a[0], a2b_up), 1)
         a2b_rev_lap = self.rev(rev_input)
-        a2b_rev = network.fold_laplace_pyramid([a2b_rev_lap, a2b])
+        a2b_rev = network.fold_laplace_pyramid([a2b_rev_lap, self.a2b])
 
         self.a2b_rev = a2b_rev
 
@@ -265,6 +287,15 @@ class LapAdaINModel1(nn.Module):
             self.dis_opt.load_state_dict(checkpoint["dis_opt"])
         
             return checkpoint["ep"], checkpoint["total_iter"]
+
+    def assemble_outputs(self):
+        img_a = self.input_a.detach()
+        img_b = self.input_b.detach()
+        img_a2b = self.a2b.detach()
+        img_rev = self.a2b_rev.detach()
+        row1 = torch.cat((img_a[0:1, ::], img_b[0:1, ::], img_a2b[0:1, ::], img_rev[0:1, ::]), 3)
+        row2 = torch.cat((img_a[1:2, ::], img_b[1:2, ::], img_a2b[1:2, ::], img_rev[1:2, ::]), 3)
+        return torch.cat((row1, row2), 2)
 
 class LapAdaINModel2(nn.Module):
     def __init__(self, args):
@@ -402,6 +433,11 @@ class LapAdaINModel2(nn.Module):
         self.backward_dis()
         self.step()
 
+    def set_gpu(self, gpu):
+        self.gpu = gpu
+        self.rev2.cuda(self.gpu)
+        self.dis.cuda(gpu)
+
     def save_model(self, filename, ep, total_iter):
         state = {
             "rev2": self.rev2.state_dict(),
@@ -423,3 +459,13 @@ class LapAdaINModel2(nn.Module):
             self.dis_opt.load_state_dict(checkpoint["dis_opt"])
         
             return checkpoint["ep"], checkpoint["total_iter"]
+
+    def assemble_outputs(self):
+        img_a = self.input_a.detach()
+        img_b = self.input_b.detach()
+        img_a2b = self.a2b.detach()
+        img_rev = self.a2b_rev.detach()
+        img_rev2 = self.a2b_rev2.detach()
+        row1 = torch.cat((img_a[0:1, ::], img_b[0:1, ::], img_a2b[0:1, ::], img_rev[0:1, ::], img_rev2[0:1, ::]), 3)
+        row2 = torch.cat((img_a[1:2, ::], img_b[1:2, ::], img_a2b[1:2, ::], img_rev[1:2, ::], img_rev2[1:2, ::]), 3)
+        return torch.cat((row1, row2), 2)

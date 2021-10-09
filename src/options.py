@@ -35,6 +35,7 @@ class TrainOptions():
         self.parser.add_argument("--resume", type=str, help="resume training")
         self.parser.add_argument("--d_iter", type=int, default=3, help="# of iterations for updating content discriminator")
         self.parser.add_argument("--gpu", type=int, default=0, help="gpu device")
+        self.parser.add_argument("--dec_path", type=str, default="../model/dec.pth", help="path of dec path")
 
 
     def parse(self):

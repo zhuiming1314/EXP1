@@ -127,3 +127,5 @@ class CalcGanLoss():
             pass
         else:
             print("error")
+
+        return loss

@@ -160,8 +160,11 @@ class ReviseNet(nn.Module):
         self.down_sample = nn.Sequential(*down_blocks)
         self.up_sample = nn.Sequential(*up_blocks)
 
-    def forward(self, input):
-        return self.up_sample(self.res_block(self.down_sample(input)))
+    def forward(self, x):
+        x = self.down_sample(x)
+        x = self.res_block(x)
+        x = self.up_sample(x)
+        return x
 
 
 
@@ -173,23 +176,25 @@ class ReviseNet(nn.Module):
 
 class Discirminator(nn.Module):
     def __init__(self):
-        super()
+        super(Discirminator, self).__init__()
         self.n_layer = 3
         n_in = 3
         n_out = 32
 
-        self.head = nn.Sequential([
-            nn.Conv2d(n_in, n_out, 3, 1, 1),
-            nn.BatchNorm2d(n_out),
-            nn.LeakyReLU(0.2)])
+        head = []
+        head.append(nn.Conv2d(n_in, n_out, 3, 1, 1))
+        head.append(nn.BatchNorm2d(n_out))
+        head.append(nn.LeakyReLU(0.2))
+
+        self.head = nn.Sequential(*head)
         body = []
         n_in = n_out
         for _ in range(self.n_layer - 2):
-            self.body.append(nn.Conv2d(n_in, n_out, 3, 1, 1))
-            self.body.append(nn.BatchNorm2d(n_out))
-            self.body.append(nn.LeakyReLU(0.2))
+            body.append(nn.Conv2d(n_in, n_out, 3, 1, 1))
+            body.append(nn.BatchNorm2d(n_out))
+            body.append(nn.LeakyReLU(0.2))
         
-        self.body = nn.Sequetial(*body)
+        self.body = nn.Sequential(*body)
         self.tail = nn.Conv2d(n_in, 1, 3, 1, 1)
        
     def forward(self, x):
