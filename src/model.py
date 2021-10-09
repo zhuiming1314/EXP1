@@ -195,13 +195,20 @@ class LapAdaINModel1(nn.Module):
         b_f = self.enc(self.pyr_b[1])
 
         self.a2b = self.dec(a_f, b_f)
-        a2b_up = F.interpolate(self.a2b, scale_factor=2)
+        self.a2b_up = F.interpolate(self.a2b, scale_factor=2)
 
-        rev_input = torch.cat((self.pyr_a[0], a2b_up), 1)
+        rev_input = torch.cat((self.pyr_a[0], self.a2b_up), 1)
         a2b_rev_lap = self.rev(rev_input)
         a2b_rev = network.fold_laplace_pyramid([a2b_rev_lap, self.a2b])
 
         self.a2b_rev = a2b_rev
+
+        self.image_display = torch.cat((self.input_a[0:1].detach().cpu(), self.input_b[0:1].detach().cpu(),
+                                        self.a2b_up[0:1].detach().cpu(), self.a2b_rev[0:1].detach().cpu(),
+                                        self.input_a[1:2].detach().cpu(), self.input_b[1:2].detach().cpu(),
+                                        self.a2b_up[0:1].detach().cpu(), self.a2b_rev[1:2].detach().cpu()))
+
+        return self.a2b
 
     def backward_gen(self):
         self.a2b_f = self.enc(self.a2b_rev)
@@ -216,7 +223,7 @@ class LapAdaINModel1(nn.Module):
         # style loss
         self.loss_s = 0
         for layer in self.style_layers:
-            self.loss_s += self.calc_style_loss(self.a2b_f[layer], self.b[layer])
+            self.loss_s += self.calc_style_loss(self.a2b_f[layer], self.b_f[layer])
 
         # relative loss
         self.loss_style_remd = self.calc_style_emd_loss(self.a2b_f["r31"], self.b_f["r31"])\
@@ -264,7 +271,7 @@ class LapAdaINModel1(nn.Module):
         self.set_requires_grad(self.dis, True)
         self.dis_opt.zero_grad()
         self.backward_dis()
-        self.step()
+        self.dis_opt.step()
 
     def save_model(self, filename, ep, total_iter):
         state = {
@@ -291,10 +298,10 @@ class LapAdaINModel1(nn.Module):
     def assemble_outputs(self):
         img_a = self.input_a.detach()
         img_b = self.input_b.detach()
-        img_a2b = self.a2b.detach()
+        img_a2b_up = self.a2b_up.detach()
         img_rev = self.a2b_rev.detach()
-        row1 = torch.cat((img_a[0:1, ::], img_b[0:1, ::], img_a2b[0:1, ::], img_rev[0:1, ::]), 3)
-        row2 = torch.cat((img_a[1:2, ::], img_b[1:2, ::], img_a2b[1:2, ::], img_rev[1:2, ::]), 3)
+        row1 = torch.cat((img_a[0:1, ::], img_b[0:1, ::], img_a2b_up[0:1, ::], img_rev[0:1, ::]), 3)
+        row2 = torch.cat((img_a[1:2, ::], img_b[1:2, ::], img_a2b_up[1:2, ::], img_rev[1:2, ::]), 3)
         return torch.cat((row1, row2), 2)
 
 class LapAdaINModel2(nn.Module):
